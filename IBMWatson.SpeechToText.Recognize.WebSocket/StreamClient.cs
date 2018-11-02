@@ -24,7 +24,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     protected readonly CancellationToken cancellationToken = new CancellationToken();
 
-    private Task ReceiveTask;
+    private Thread ReceiveThread;
 
     public StreamClient(RegionalHost regionalHost, string apiKey)
     {
@@ -51,7 +51,9 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
       await watson.ConnectAsync(builder.Uri, cancellationToken);
       await SendAsync(parameters.ToString());
-      ReceiveTask = ReceiveTranscription();
+      
+      ReceiveThread = new Thread(ReceiveTranscription);
+      ReceiveThread.Start();
     }
 
     public async Task SendAsync(string data)
@@ -72,7 +74,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     public event EventHandler<TranscriptionEventArgs> TranscriptionReceived;
 
-    protected async Task ReceiveTranscription()
+    protected async void ReceiveTranscription()
     {
       byte[] buffer = new byte[1024];
 
@@ -115,7 +117,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
     public void Dispose()
     {
       CloseAsync().Wait();
-      ReceiveTask.Wait(30000, cancellationToken);  // 30 second timeout
+      ReceiveThread.Join(30000);  // 30 second timeout
       ((IDisposable)watson).Dispose();
     }
   }
