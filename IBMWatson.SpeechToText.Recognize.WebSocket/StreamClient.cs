@@ -1,4 +1,3 @@
-using IBM.WatsonDeveloperCloud.SpeechToText.v1.Model;
 using IBM.WatsonDeveloperCloud.Util;
 using Newtonsoft.Json;
 using System;
