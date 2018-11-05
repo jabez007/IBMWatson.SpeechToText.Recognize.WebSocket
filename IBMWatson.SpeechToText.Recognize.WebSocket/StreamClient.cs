@@ -101,7 +101,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     public event EventHandler<TranscriptionEventArgs> TranscriptionReceived;
 
-    protected void Receive()
+    protected async void Receive()
     {
       byte[] buffer = new byte[1048576];  // 1 MB
 
@@ -109,7 +109,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
       while (watson.State == WebSocketState.Open || watson.State == WebSocketState.CloseSent)
       {
         var segment = new ArraySegment<byte>(buffer);
-        var result = watson.ReceiveAsync(segment, cancellationToken).Result;
+        var result = await watson.ReceiveAsync(segment, cancellationToken);
 
         if (result.MessageType == WebSocketMessageType.Close)
         {
@@ -122,12 +122,12 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
           if (count >= buffer.Length)
           {
             closeRequested = true;
-            watson.CloseAsync(WebSocketCloseStatus.InvalidPayloadData, "Received transcription too large", cancellationToken).Wait();
+            await watson.CloseAsync(WebSocketCloseStatus.InvalidPayloadData, "Received transcription too large", cancellationToken);
             return;
           }
 
           segment = new ArraySegment<byte>(buffer, count, buffer.Length - count);
-          result = watson.ReceiveAsync(segment, cancellationToken).Result;
+          result = await watson.ReceiveAsync(segment, cancellationToken);
           count += result.Count;
         }
 
