@@ -127,7 +127,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
   internal class TranscriptionEventArgs : EventArgs
   {
-    public readonly SpeechRecognitionResults Response;
+    public readonly RecognitionResponse Response;
 
     public TranscriptionEventArgs(string results)
     {
