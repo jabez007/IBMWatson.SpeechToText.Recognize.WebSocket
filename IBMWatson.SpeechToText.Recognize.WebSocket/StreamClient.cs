@@ -1,6 +1,7 @@
 using IBM.WatsonDeveloperCloud.Util;
 using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -23,7 +24,13 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     protected readonly CancellationToken cancellationToken = new CancellationToken();
 
-    private Thread ReceiveThread;
+    private readonly ConcurrentQueue<(ArraySegment<byte>, WebSocketMessageType)> sendQueue = new ConcurrentQueue<(ArraySegment<byte>, WebSocketMessageType)>();
+
+    private bool closeRequested = false;
+
+    private Thread sendThread;
+
+    private Thread receiveThread;
 
     public StreamClient(RegionalHost regionalHost, string apiKey)
     {
@@ -40,48 +47,69 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     public async Task ConnectAsync(QueryParameters queryParameters, Parameters parameters)
     {
+      closeRequested = false;
+
       watson = new ClientWebSocket();
       watson.Options.SetRequestHeader("Authorization", $"Bearer {tokenManager.GetToken()}");
-    
+
       UriBuilder builder = new UriBuilder(endpoint)
       {
         Query = queryParameters.ToQueryString()
       };
 
       await watson.ConnectAsync(builder.Uri, cancellationToken);
-      await SendAsync(parameters.ToString());
-      
-      ReceiveThread = new Thread(ReceiveTranscription);
-      ReceiveThread.Start();
+      StartAsync(parameters);
+
+      sendThread = new Thread(Send);
+      sendThread.Start();
+
+      receiveThread = new Thread(Receive);
+      receiveThread.Start();
     }
 
-    public async Task SendAsync(string data)
+    protected void StartAsync(Parameters parameters)
     {
-      if (watson.State == WebSocketState.Open)
+      SendAsync(parameters.ToString());
+    }
+
+    public void SendAsync(string data)
+    {
+      if (!closeRequested)
       {
-        await watson.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(data)), WebSocketMessageType.Text, true, cancellationToken);
+        sendQueue.Enqueue((new ArraySegment<byte>(Encoding.UTF8.GetBytes(data)), WebSocketMessageType.Text));
       }
     }
 
-    public async Task SendAsync(byte[] data)
+    public void SendAsync(byte[] data)
     {
-      if (watson.State == WebSocketState.Open)
+      if (!closeRequested)
       {
-        await watson.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true, cancellationToken);
+        sendQueue.Enqueue((new ArraySegment<byte>(data), WebSocketMessageType.Binary));
+      }
+    }
+
+    protected void Send()
+    {
+      while (!closeRequested)
+      {
+        while (watson.State == WebSocketState.Open && sendQueue.TryDequeue(out (ArraySegment<byte>, WebSocketMessageType) result))
+        {
+          watson.SendAsync(result.Item1, result.Item2, true, cancellationToken).Wait();
+        }
       }
     }
 
     public event EventHandler<TranscriptionEventArgs> TranscriptionReceived;
 
-    protected async void ReceiveTranscription()
+    protected void Receive()
     {
-      byte[] buffer = new byte[1024];
-      
+      byte[] buffer = new byte[1048576];  // 1 MB
+
       // Valid states are: 'Open, CloseSent'
       while (watson.State == WebSocketState.Open || watson.State == WebSocketState.CloseSent)
       {
         var segment = new ArraySegment<byte>(buffer);
-        var result = await watson.ReceiveAsync(segment, cancellationToken);
+        var result = watson.ReceiveAsync(segment, cancellationToken).Result;
 
         if (result.MessageType == WebSocketMessageType.Close)
         {
@@ -93,12 +121,13 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
         {
           if (count >= buffer.Length)
           {
-            await watson.CloseAsync(WebSocketCloseStatus.InvalidPayloadData, "Received transcription too large", cancellationToken);
+            closeRequested = true;
+            watson.CloseAsync(WebSocketCloseStatus.InvalidPayloadData, "Received transcription too large", cancellationToken).Wait();
             return;
           }
 
           segment = new ArraySegment<byte>(buffer, count, buffer.Length - count);
-          result = await watson.ReceiveAsync(segment, cancellationToken);
+          result = watson.ReceiveAsync(segment, cancellationToken).Result;
           count += result.Count;
         }
 
@@ -108,13 +137,20 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
       }
     }
 
+    protected void StopAsync()
+    {
+      SendAsync(new Parameters() { Action = StreamAction.Stop }.ToString());
+    }
+
     public async Task CloseAsync()
     {
-      await SendAsync(new Parameters() { Action = StreamAction.Stop }.ToString());
+      StopAsync();
+      closeRequested = true;
+      // wait to finish up sending the queue
+      sendThread.Join(30000); // 30 second timeout
       await watson.CloseAsync(WebSocketCloseStatus.NormalClosure, "Close", cancellationToken);
       // wait for the read thread to realize the socket it closed
-      ReceiveThread.Join(30000);  // 30 second timeout
-      watson.Dispose()
+      receiveThread.Join(30000);  // 30 second timeout
     }
 
     public void Dispose()
