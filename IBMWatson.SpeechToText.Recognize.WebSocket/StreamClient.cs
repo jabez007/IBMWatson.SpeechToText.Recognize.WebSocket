@@ -18,7 +18,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
   {
     protected static TokenManager tokenManager;
 
-    protected readonly ClientWebSocket watson;
+    protected ClientWebSocket watson;
 
     protected readonly Uri endpoint;
 
@@ -36,14 +36,14 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
         });
       }
 
-      watson = new ClientWebSocket();
-      watson.Options.SetRequestHeader("Authorization", $"Bearer {tokenManager.GetToken()}");
-
       endpoint = new Uri($"wss://{regionalHost}/speech-to-text/api/v1/recognize");
     }
 
     public async Task ConnectAsync(QueryParameters queryParameters, Parameters parameters)
     {
+      watson = new ClientWebSocket();
+      watson.Options.SetRequestHeader("Authorization", $"Bearer {tokenManager.GetToken()}");
+    
       UriBuilder builder = new UriBuilder(endpoint)
       {
         Query = queryParameters.ToQueryString()
@@ -77,8 +77,9 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
     protected async void ReceiveTranscription()
     {
       byte[] buffer = new byte[1024];
-
-      while (true)
+      
+      // Valid states are: 'Open, CloseSent'
+      while (watson.State == WebSocketState.Open || watson.State == WebSocketState.CloseSent)
       {
         var segment = new ArraySegment<byte>(buffer);
         var result = await watson.ReceiveAsync(segment, cancellationToken);
@@ -114,6 +115,7 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
       await watson.CloseAsync(WebSocketCloseStatus.NormalClosure, "Close", cancellationToken);
       // wait for the read thread to realize the socket it closed
       ReceiveThread.Join(30000);  // 30 second timeout
+      watson.Dispose()
     }
 
     public void Dispose()
