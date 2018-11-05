@@ -112,12 +112,13 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
     {
       await SendAsync(new Parameters() { Action = StreamAction.Stop }.ToString());
       await watson.CloseAsync(WebSocketCloseStatus.NormalClosure, "Close", cancellationToken);
+      // wait for the read thread to realize the socket it closed
+      ReceiveThread.Join(30000);  // 30 second timeout
     }
 
     public void Dispose()
     {
       CloseAsync().Wait();
-      ReceiveThread.Join(30000);  // 30 second timeout
       ((IDisposable)watson).Dispose();
     }
   }
