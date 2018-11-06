@@ -158,8 +158,8 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
       if (watson != null)
       {
         CloseAsync().Wait();
+        ((IDisposable)watson).Dispose();
       }
-      ((IDisposable)watson).Dispose();
     }
   }
 
