@@ -155,7 +155,10 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
 
     public void Dispose()
     {
-      CloseAsync().Wait();
+      if (watson != null)
+      {
+        CloseAsync().Wait();
+      }
       ((IDisposable)watson).Dispose();
     }
   }
