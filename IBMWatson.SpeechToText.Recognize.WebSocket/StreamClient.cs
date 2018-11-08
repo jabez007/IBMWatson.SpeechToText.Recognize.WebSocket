@@ -147,10 +147,19 @@ namespace IBMWatson.SpeechToText.Recognize.WebSocket
       StopAsync();
       closeRequested = true;
       // wait to finish up sending the queue
-      sendThread.Join(30000); // 30 second timeout
-      await watson.CloseAsync(WebSocketCloseStatus.NormalClosure, "Close", cancellationToken);
+      if (sendThread != null)
+      {
+        sendThread.Join(30000); // 30 second timeout
+      }
+      if (watson != null)
+      {
+        await watson.CloseAsync(WebSocketCloseStatus.NormalClosure, "Close", cancellationToken);
+      }
       // wait for the read thread to realize the socket it closed
-      receiveThread.Join(30000);  // 30 second timeout
+      if (receiveThread != null)
+      {
+        receiveThread.Join(30000);  // 30 second timeout
+      }
     }
 
     public void Dispose()
